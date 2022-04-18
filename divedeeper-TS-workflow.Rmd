@@ -1,0 +1,173 @@
+---
+title: "Dive Deeper: Time Series Workflow"
+author: "Your Name"
+date: "`r format(Sys.Date(), '%B %e, %Y')`"
+output:
+  html_document:
+    number_sections: true
+    df_print: paged
+    highlight: tango
+    theme: cosmo
+    toc: yes
+    toc_depth: 4
+    toc_float:
+      collapsed: true
+  pdf_document:
+    toc: yes
+  word_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+# chunk options
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center",
+  comment = "#>"
+)
+
+options(scipen = 999)
+```
+
+<style>
+body {
+text-align: justify}
+</style>
+
+```{r warning=FALSE, message=FALSE}
+library(tidyverse)
+library(lubridate) # date manipulation
+library(padr) # TS padding
+library(zoo) # TS padding
+library(fpp) # TS dataset
+library(TSstudio) # TS interactive viz
+
+library(forecast) # TS library
+library(TTR) # SMA function
+library(tseries) # adf.test
+
+# supaya semua plot memiliki theme_minimal()
+theme_set(theme_minimal())
+```
+
+# Dive Deeper
+
+Gunakan data `souvenir` untuk melakukan fitting model dan forecasting menggunakan metode exponential smoothing. Data tersebut merupakan data penjualan souvenir per bulan selama 7 tahun dari bulan Januari 1987 sampai Desember 1993.
+
+## Import Data
+
+Load data menggunakan fungsi `scan()` untuk emmbaca data menjadi sebuah vector, lalu lakukan visualisasi dengan base `plot()`
+
+```{r}
+# import data
+souvenir <- scan("data_input/fancy.dat")
+
+# line plot
+plot(souvenir, type = "l")
+```
+
+## Time Series Object
+
+Buatlah object Time Series `ts(data, start, frequency)`, lalu visualisasikan dengan `autoplot()`
+
+```{r}
+# object TS
+souvenir_ts <- 
+  
+# autoplot
+
+```
+
+**Insight:** Apakah TS termasuk tipe additive/multiplicative? ...
+
+## Exploratory Data
+
+Lakukan decomposition sesuai dengan tipe additive/multiplicativenya, lalu buatlah bar plot untuk menganalisa komponen seasonalitynya.
+
+```{r}
+# decomposition
+souvenir_dc <- 
+  
+# autoplot
+
+```
+
+```{r}
+# seasonality analysis
+data.frame(
+  Month = factor(month.abb, levels=month.abb),
+  Seasonality = souvenir_dc$seasonal
+) %>% 
+  distinct() %>% 
+  ggplot(aes(x = Month, y = Seasonality)) +
+  geom_col()
+```
+
+**Insight:** Bagaimana trend dan seasonality dari penjualan souvenir? ...
+
+## Cross Validation
+
+Lakukan train-test splitting, dimana 1 tahun untuk data test dan sisanya untuk data train
+
+```{r}
+# data test
+
+# data train
+
+```
+
+## Fitting Model
+
+Buatlah minimal 2 model exponential smoothing dengan fungsi berikut:
+
+- `HoltWinters()`
+- `ets()`
+
+Note, pemilihan model berdasarkan:
+
+- ada atau tidaknya trend, seasonality
+- tipe additive/multiplicative
+
+```{r}
+
+```
+
+## Forecasting
+
+Gunakan `forecast()` untuk masing-masing model yang Anda buat sebelumnya:
+
+```{r}
+
+```
+
+Visualisasikan data actual (train dan test) dengan hasil forecasting
+
+```{r}
+
+```
+
+## Model Evaluation
+
+```{r}
+
+```
+
+**Kesimpulan:** Berdasarkan nilai error di atas, model yang terbaik adalah ...
+
+## Next Step
+
+Bagian ini opsional, namun penting untuk diketahui
+
+Misalkan selanjutnya ada kebutuhan untuk melakukan forecasting periode Jan 1994 - Dec 1994 (satu tahun kedepan dari data `souvenir`). Maka practice yang umum dilakukan, biasanya kita re-train semua data (train + test) menggunakan best model pada tahap sebelumnya.
+
+```{r}
+# misal pada tahap sebelumnya, model terbaik adalah dengan fungsi ets() model ZZZ
+souvenir_ets_full <- ets(souvenir_ts, model = "ZZZ")
+souvenir_ets_full_f <- forecast(souvenir_ets_full, h = 12)
+
+# visualisasi
+souvenir_ts %>% 
+  autoplot(series = "Full Data") +
+  autolayer(souvenir_ets_full_f, series = "Forecast 1 year")
+```

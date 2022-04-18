@@ -1,0 +1,288 @@
+---
+title: "Dive Deeper: ARIMA Workflow"
+author: "Your Name"
+date: "`r format(Sys.Date(), '%B %e, %Y')`"
+output:
+  html_document:
+    number_sections: true
+    df_print: paged
+    highlight: tango
+    theme: cosmo
+    toc: yes
+    toc_depth: 4
+    toc_float:
+      collapsed: true
+  pdf_document:
+    toc: yes
+  word_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+# chunk options
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center",
+  comment = "#>"
+)
+
+options(scipen = 999)
+```
+
+<style>
+body {
+text-align: justify}
+</style>
+
+```{r warning=FALSE, message=FALSE}
+library(tidyverse)
+library(lubridate) # date manipulation
+library(padr) # TS padding
+library(zoo) # TS padding
+library(fpp) # TS dataset
+library(TSstudio) # TS interactive viz
+
+library(forecast) # TS library
+library(TTR) # SMA function
+library(tseries) # adf.test
+
+# supaya semua plot memiliki theme_minimal()
+theme_set(theme_minimal())
+```
+
+# Dive Deeper: ARIMA
+
+Kita akan melakukan fitting model dan forecasting menggunakan metode ARIMA untuk data personal consumption expenditure per kuarternya di US dari tahun 1970 sampai 2010 (41 tahun).
+
+## Import Data
+
+Load data `uschange` dari package `fpp`, kemudian cukup ambil kolom `consumption`nya saja.
+
+```{r}
+# import data
+usc <- fpp::usconsumption[, 'consumption']
+head(usc, 12)
+```
+
+```{r}
+class(usc)
+```
+
+Dikarenakan data sudah merupakan objek time series, maka kita tidak perlu mengubahnya
+
+## Exploratory Data
+
+Lakukan visualisasi dengan fungsi `autoplot()`
+
+```{r}
+usc %>% 
+  autoplot() +
+  xlab("Year") +
+  ylab("Quarterly percentage change")
+```
+
+**Insight:** Bagaimana trend dan seasonality dari US consumption?
+
+- trend: sedikit fluktuatif
+- seasonality: tidak ada pola berulang
+
+> Apabila Anda ragu apakah sebuah data time series memiliki pola berulang atau tidak, Anda dapat menggunakan test statistic seperti WO test. NAMUN, menurut Rob Hyndman tes tersebut hanya sebagai referensi tambahan saja. Alangkah lebih baik tetap mengutamakan hasil visualisasi ataupun berdasarkan business knowledgenya.
+
+Referensi: [Detecting seasonality](https://robjhyndman.com/hyndsight/detecting-seasonality/)
+
+```{r}
+# OPTIONAL: seasonality test
+library(seastests)
+summary(wo(usc))
+```
+
+## Cross Validation
+
+Lakukan train-test splitting, gunakan 8 tahun terakhir sebagai data test, sisanya sebagai data train. Ingat:
+
+- Panjang data `usc` adalah 41 tahun
+- Frekuensi data adalah 4 (quarterly)
+
+```{r}
+# data test
+usc_test <- tail(usc, 8*4)
+
+# data train
+usc_train <- head(usc, -8*4)
+```
+
+## Fitting Model
+
+### Model Auto
+
+Silahkan gunakan `auto.arima()` untuk mendapatkan baseline model ARIMA.
+
+```{r}
+usc_auto <- auto.arima(y = usc_train, seasonal = FALSE)
+summary(usc_auto)
+```
+
+Dihasilkan model ARIMA(1,0,1)
+
+### Model Manual
+
+Selanjutnya, lakukan tuning model dengan tentukan order p, d, q secara manual.
+
+**Menentukan order d**
+
+Cek stasioneritas data dengan `adf.test()`. Berikut hipotesisnya:
+
+- $H_0$: Punya unit root (tidak stasioner)
+- $H_1$: Tidak punya unit root (stasioner)
+
+```{r}
+usc_train %>% 
+  adf.test()
+```
+
+Kesimpulan:
+
+- Nilai p-value lebih kecil dari alpha (0.05)
+- Maka dapat disimpulkan data sudah stasioner
+
+Apabila belum, maka lakukan differencing hingga stasioner (no trend, no seasonality).
+
+```{r}
+# sudah stasioner, tidak perlu differencing
+```
+
+Kesimpulan: order d = 0
+
+**Menentukan order p dan q**
+
+Membuat plot ACF dan PACF
+
+```{r}
+# custom function untuk plot ACF dan PACF
+library(patchwork)
+
+plot_cf <- function(x, lag.max = NULL){
+  p1 <- ggAcf(x, lag.max=lag.max) + labs(title = "Plot ACF and PACF")
+  p2 <- ggPacf(x, lag.max=lag.max) + labs(title = NULL)
+  p1 / p2
+}
+```
+
+```{r}
+plot_cf(usc_train)
+```
+
+Kemungkinan order p: 1,2,3
+Kemungkinan order q: 1,2,3
+
+Kombinasi model ARIMA(p,d,q):
+
+- ARIMA(1,0,1)
+- ARIMA(1,0,2)
+- ARIMA(1,0,3)
+- ARIMA(2,0,1)
+- ARIMA(2,0,2)
+- ARIMA(2,0,3)
+- ARIMA(3,0,1)
+- ARIMA(3,0,2)
+- ARIMA(3,0,3)
+
+Mari fitting kombinasi model tersebut dengan `Arima()`:
+
+```{r}
+# apabila kombinasi model dirasa terlalu banyak, untuk latihan kali ini cukup buat 3 kombinasi saja
+usc_arima1 <- Arima(y = usc_train, order = c(3,0,1))
+usc_arima2 <- Arima(y = usc_train, order = c(3,0,2))
+usc_arima3 <- Arima(y = usc_train, order = c(3,0,3))
+```
+
+Bandingkan performa masing-masing model di data train dengan `compare_fitting()`
+
+```{r}
+# custom function untuk membandingkan performa di data train
+compare_fitting <- function(x){
+  lapply(x, function(x) summary(x)["Training set", ]) %>% 
+    lapply(., function(x) x %>% t() %>% as.data.frame) %>% 
+    bind_rows() %>% 
+    mutate(model = names(x)) %>%
+    select(model, everything())
+}
+```
+
+```{r}
+model_list <- list(
+  "ARIMA(1,0,1)" = usc_auto,
+  "ARIMA(3,0,1)" = usc_arima1,
+  "ARIMA(3,0,2)" = usc_arima2,
+  "ARIMA(3,0,3)" = usc_arima3)
+
+compare_fitting(model_list)
+```
+
+MAPE Inf karena terdapat data yang bernilai 0 pada `usc_train`. Maka dari itu, gunakanlah metric yang lain seperti RMSE/MAE
+
+```{r}
+usc_train == 0
+```
+
+## Forecasting
+
+Gunakan `forecast()` untuk masing-masing model yang Anda buat sebelumnya:
+
+```{r}
+usc_auto_f <- forecast(usc_auto, h = 8*4)
+usc_arima1_f <- forecast(usc_arima1, h = 8*4)
+usc_arima2_f <- forecast(usc_arima2, h = 8*4)
+usc_arima3_f <- forecast(usc_arima3, h = 8*4)
+```
+
+## Model Evaluation
+
+Bandingkan performa masing-masing model di data test dengan `compare_forecast()`
+
+```{r}
+# custom function untuk membandingkan performa di data test
+compare_forecast <- function(x, test){
+  lapply(x, function(x) forecast::accuracy(x, test)["Test set", ]) %>%
+    lapply(., function(x) x %>% t() %>% as.data.frame) %>% 
+    bind_rows() %>% 
+    mutate(model = names(x)) %>%
+    select(model, everything())
+}
+```
+
+```{r}
+forecast_list <- list(
+  "ARIMA(1,0,1)" = usc_auto_f,
+  "ARIMA(3,0,1)" = usc_arima1_f,
+  "ARIMA(3,0,2)" = usc_arima2_f,
+  "ARIMA(3,0,3)" = usc_arima3_f)
+
+compare_forecast(forecast_list, usc_test)
+```
+
+Visualisasikan hasil forecasting model
+
+```{r}
+usc %>% 
+  autoplot(series = "Actual") +
+  autolayer(usc_auto_f$mean, series = "ARIMA(1,0,1)") +
+  autolayer(usc_arima1_f$mean, series = "ARIMA(3,0,1)") +
+  autolayer(usc_arima2_f$mean, series = "ARIMA(3,0,2)") +
+  autolayer(usc_arima3_f$mean, series = "ARIMA(3,0,3)")
+```
+
+Kesimpulan:
+
+- Model terbaik di data test adalah ARIMA(1,0,1) berdasarkan RMSE terkecil
+- Training error = 0.6580432 (RMSE)
+- Testing error = 0.6925982 (RMSE)
+- Apakah underfit/best fit/overfit? underfit karena error masih tergolong besar sekali
+
+Note: kita dapat membandingkan RMSE dengan standar deviasi (stdev) data asli, apabila RMSE mendekati nilai stdev maka performa model masih buruk.
+
+```{r}
+# standar deviasi data asli
+sd(usc)
+```
